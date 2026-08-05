@@ -5,6 +5,9 @@
 **丢一个 X / YouTube / B站 视频链接进来，几分钟后拿到一张一眼看完的中文卡片
 （摘要 + 要点 + 金句中英对照）+ 完整解读，还能就着它追问。**
 
+**Drop in an X / YouTube / Bilibili video link, and minutes later get a glanceable card
+(summary + key points + bilingual highlights) + full breakdown you can then ask questions about.**
+
 它是 [read-anything](https://github.com/heyuxuan0209/read-anything) 的姊妹：
 **read 管读文字，watch 管看视频。**
 
@@ -18,7 +21,212 @@ Claude Code / Agent 里跑，产物是 markdown；灵感库 / 飞书同步是工
 
 </div>
 
+**English** · [中文](#中文)
+
 ---
+
+## English
+
+## What is this
+
+Your bookmarks are probably full of videos you "meant to watch someday" — a forty-minute
+English tech talk, a tweet with a video, a podcast conversation, a caption-less long video on
+Bilibili... and they just sit there collecting dust, too long to finish, too much to get through.
+
+watch-anything is a **Claude Code / Agent skill**: drop in a video link, it first fetches the
+content, transcribes the audio track into text (if there are no captions), then has your AI produce
+a Chinese card breakdown, with the output landing as markdown in your own knowledge base. The whole
+thing happens inside your agent — no switching back and forth between a dozen web tools.
+
+## The specific pain it solves
+
+- **Bookmarked it but no time to watch** → in minutes you get a card that lets you "get it without watching the original"
+- **English / caption-less videos, where other summary tools just give up** → auto-downloads the audio track and transcribes, then produces a Chinese breakdown
+- **Want to dig into details** → chat over the transcript, answers grounded only in the source, no fabrication
+- **Watch and forget, scattered everywhere** → the breakdown lands as markdown, accumulating into your own system
+
+## The killer feature: understand even without captions
+
+Most "video summary" tools rely on the platform's **existing captions**, and choke on videos without
+them. The core of watch-anything is a complete transcription fallback chain, where each level
+automatically drops down to the next on failure:
+
+```
+Video captions (fast, accurate)  →  Groq cloud whisper (tens of seconds, nearly free)  →  local faster-whisper (zero API cost, never leaves your machine)
+```
+
+If there are captions, use them; if not, download the audio track and transcribe. With `GROQ_API_KEY`
+configured it goes through the cloud; without it, transcribe locally (audio never leaves your machine).
+This is also its real value relative to read-anything: read currently only grabs X as **text**, and
+**does not download and transcribe video**; watch fills in exactly that gap.
+
+## Why a skill, not a browser extension
+
+Because the killer feature "caption-less video transcription" needs `yt-dlp` + `whisper` — **these
+can't run inside a browser extension**. A skill is the only form that is "zero-server + full-capability":
+the host Claude Code is itself the large model, and the skill just provides the fetching / transcription
+scripts, leaving translation and interpretation to the host agent. So it doesn't need you to stand up
+your own backend — clone it and it just works.
+
+## How to use
+
+**Install** (Claude Code, one command):
+
+```bash
+git clone https://github.com/heyuxuan0209/watch-anything.git ~/.claude/skills/watch-anything
+```
+
+Once installed, in any session just drop a video link and say "break this down / what's it about" to
+trigger it. Update with `git -C ~/.claude/skills/watch-anything pull`. To install it only for a
+specific project, clone it into that project's `.claude/skills/watch-anything`.
+
+**It looks like this in use** (taking the tweet in the GIF above as an example, real link
+[x.com/Krishnasagrawal/status/2084314878576365906](https://x.com/Krishnasagrawal/status/2084314878576365906)):
+
+```
+You: https://x.com/Krishnasagrawal/status/2084314878576365906 what's this video about
+It: (fetch-x gets the tweet → finds a 28-min video → yt-dlp downloads the audio track → Groq/local whisper transcribes → produces card)
+```
+
+The card that comes out (full version in the GIF at the top) looks roughly like this:
+
+```
+# Anthropic official prompt workshop: how to really get the most out of Claude Code
+> Krishna Agrawal（@Krishnasagrawal）| X | 2026-08-03 | 视频转写（语音听写，可能有少量误差）
+
+【摘要】
+Anthropic 团队成员 Boris 在一场 28 分钟免费研讨会里，系统讲解如何真正用好 Claude Code
+这个 Agent 化编码助手：从环境配置、代码库上下文，到让它记住特定行为、写入 CLAUDE.md……
+
+【要点】
+- 给 Claude 一个能自我检查的反馈闭环（跑测试、Puppeteer 截图），它会自动迭代，比一次成型好得多
+- 通过项目里的 CLAUDE.md 共享常用命令 / MCP 工具 / 斜杠决策，把团队工具接成 MCP 供它调用
+- 用好快捷键：Shift+Tab 进自动接受、Esc 随时安全中断、输入「#」让它记住特定行为
+- Code CLI 可当超级智能的 Unix 工具接进管道，适合 CI 故障响应、日志分析等进阶场景
+
+【金句】
+> 得到你想要的结果的最简单办法，是让它先思考。所以，先头脑风暴想法、制定计划，然后再写代码。
+> The easiest way to get what you want is asking it to think first. So, brainstorm ideas, make a plan, and only then write the code.
+
+> 给它一个能看到自己成果的方式，它就会迭代、越做越好。
+> Give it a way to see the results of its own work, and it will iterate and get much better.
+
+—— 附完整中文全稿 ——
+```
+
+**Not just Claude — any agent that can run shell commands works** (Codex / Cursor / Gemini CLI /
+WorkBuddy / OpenClaw…): the core logic all lives in `PLAYBOOK.md` (a pure-markdown playbook) +
+`scripts/` (ordinary command-line tools, JSON in/out), depending on no Claude-specific features. In
+every case the hookup is **clone + paste a paragraph into your agent's instruction file**:
+
+```bash
+git clone https://github.com/heyuxuan0209/watch-anything.git ~/.agent-skills/watch-anything
+```
+
+Paste this into the file below (each tool just differs by file name):
+
+```markdown
+## watch-anything（视频/推文 → 中文卡片解读）
+当我丢 X / YouTube / B站 / 视频链接并要求「解读 / 看懂 / 讲了啥 / 转写」时，
+按 ~/.agent-skills/watch-anything/PLAYBOOK.md 执行（路由、转写降级链、卡片格式、降级规则都在里面）。
+```
+
+| Agent | Instruction file |
+|---|---|
+| Codex CLI | `~/.codex/AGENTS.md` (global) or project-root `AGENTS.md` |
+| Cursor | Create a new rule under the project's `.cursor/rules/` (or the legacy `.cursorrules`) |
+| Gemini CLI | `~/.gemini/GEMINI.md` (global) or project-root `GEMINI.md` |
+| WorkBuddy / others / can't be bothered to configure | Paste the paragraph above into its instruction/rules file; or each time just say "handle this link per ~/.agent-skills/watch-anything/PLAYBOOK.md" |
+
+## What it can chew on
+
+- **X tweets / tweet videos**: login-free fetch of the body + quoted tweets + media list; auto-downloads and transcribes audio if there's a video
+- **YouTube**: captions first, local/cloud transcription if no captions
+- **Bilibili**: same as above
+- **Other video links**: tries whatever yt-dlp supports
+
+English videos directly produce a Chinese breakdown (no need to translate first and then read). Images
+/ video frames are P0 not parsed — it only covers "what was said," and doesn't pretend to have watched
+"what's in the frame."
+
+## Card format (default) + three alternatives
+
+The default output is a single card: **【Summary】3 sentences · 【Key points】3-6 items · 【Highlights】
+bilingual with timestamps**, plus the full Chinese transcript appended.
+
+| What you want | Which template to use |
+|---|---|
+| Card + full breakdown (default) | Card breakdown `card.md` |
+| Judge in 30 seconds whether it's worth watching | Quick scan `brief.md` |
+| Podcast / conversation, split views by person | Interview breakdown `interview.md` |
+| X thread / long tweet | Thread breakdown `thread.md` |
+| how-to / tutorial / hands-on video, broken into actionable steps | Tutorial breakdown `tutorial.md` |
+| Launch event / new product / industry news video | Launch breakdown `news.md` |
+
+**Templates can all be edited and added to**: every .md in `templates/` can be deleted or changed, drop
+one of your own in and it's a new template, just say "use my xx template." These templates are clean,
+general-purpose perspectives, containing no personalized / productized content — if you want the
+breakdown to fit your own focus (e.g. "implications for my product"), just add a template yourself.
+
+## One principle: if it can't be seen, say so
+
+Can't fetch the tweet, audio didn't transcribe, frame not parsed — it tells you all of this truthfully,
+and never uses incomplete material to fabricate a plausible-looking breakdown. Transcription output is
+labeled "may contain dictation errors," and quoted highlights remind you to check against the original
+video. Every sentence you read is traceable.
+
+## Dependencies
+
+| Dependency | Required? | Purpose |
+|---|---|---|
+| Node.js 18+ | Required | Runtime for the three scripts (zero npm dependencies) |
+| curl | Required (ships with the system) | Network layer, natively supports proxy environment variables |
+| yt-dlp | Required for the video route | Pulls captions + downloads audio track (`brew install yt-dlp`); without it, only text-only X tweets can be handled |
+| GROQ_API_KEY | Optional | Groq cloud whisper transcription (fast, nearly free, ≤25MB); get one free at [console.groq.com](https://console.groq.com) |
+| faster-whisper | Optional | Local transcription fallback (`pip install faster-whisper`, first run auto-downloads a ~460MB model) |
+
+**Transcription needs at least one of a Groq key or faster-whisper**; when you have neither, caption-less
+videos can only fall back to title + description and **will explicitly tell you it fell back**. Missing
+optional dependencies don't error out — the corresponding content degrades automatically.
+
+For access to YouTube / X from within China, set the `YOUTUBE_PROXY_URL` environment variable (e.g.
+`http://127.0.0.1:7890`). Groq uploads go through the `HTTPS_PROXY` / `http_proxy` environment variables
+(curl reads them natively).
+
+## File structure
+
+```
+watch-anything/
+├── SKILL.md          # Claude Code 触发入口（薄壳）
+├── PLAYBOOK.md       # 通用剧本：路由/转写降级链/卡片格式/诚实守则（agent 无关）★
+├── templates/        # 解读模板（卡片/快扫/访谈/Thread + 你自己的）
+└── scripts/          # fetch-x / transcribe-video / vtt-to-text（零依赖）+ transcribe.py（本地 whisper）
+```
+
+Each script runs standalone, JSON in/out, making it easy to hook into your own pipeline.
+
+## Is there a browser extension? Can it explain as you watch web pages?
+
+**Not for now.** watch-anything is a pure agent skill — you drop a link in Claude Code / another agent,
+and it fetches + transcribes + interprets. That browser side panel in the GIF at the top is the
+**built-in version** of my own knowledge workbench (connected to a local backend), and is **not in this
+skill**. The browser version — "install an extension, get explanations while you browse" — is on the
+roadmap (P2), and when it's built it'll get its own separate repo; here we first make the "zero-server +
+full-capability" skill version solid.
+
+## Provenance
+
+Distilled from the content-collection pipeline (ADR-064 cloud transcription channel) of my personal
+knowledge management system [knowledge-workbench](https://github.com/heyuxuan0209/knowledge-workbench) —
+the hardening points in the scripts (FxTwitter login-free tweet fetching, X video audio-video merge
+`bestaudio/best` fallback, the caption `en.*` wildcard triggering 429 pitfall, Node fetch not reading the
+proxy so it must go through curl, the whisper Chinese homophone mis-hearing names warning, the explicit
+declaration when tweet video transcription fails, etc.) all come from real pitfalls hit in practice, with
+the reasons preserved in the comments.
+
+---
+
+## 中文
 
 ## 这是什么
 
@@ -205,21 +413,20 @@ X 视频音画合流 `bestaudio/best` 兜底、字幕 `en.*` 通配触发 429 �
 
 ---
 
-## 🔗 关注我 · learn in public, build in public
+## 🔗 关注我 · Follow me
 
-我怎么做 AI 产品、把「看到的」变成「写出来、发出去」的方法、AI 落地的一手经验与思考——
-**都在这些平台上边做边分享**。想一起 learn / build in public，或认识做内容、做 AI
-产品的朋友，欢迎关注、来聊：
+边做 AI 产品边把一手经验和思考公开分享，欢迎关注、来聊。<br>
+I build AI products in public and share the notes here — come say hi:
 
 <table>
   <tr>
-    <td align="center"><b>小红书</b></td>
-    <td align="center"><b>微信公众号</b></td>
-    <td align="center"><b>抖音 / 视频号</b></td>
+    <td align="center"><b>小红书 · Xiaohongshu</b></td>
+    <td align="center"><b>公众号 · WeChat</b></td>
+    <td align="center"><b>抖音 · Douyin</b></td>
   </tr>
   <tr>
     <td align="center"><img src="assets/qr-xiaohongshu.jpg" width="210" alt="小红书 杰西卡"></td>
-    <td align="center"><img src="assets/qr-wechat.jpg" width="180" alt="微信公众号 杰西卡聊AI"></td>
+    <td align="center"><img src="assets/qr-wechat.jpg" width="180" alt="公众号 杰西卡聊AI"></td>
     <td align="center"><img src="assets/qr-douyin.jpg" width="210" alt="抖音 杰西卡"></td>
   </tr>
   <tr>
@@ -229,9 +436,8 @@ X 视频音画合流 `bestaudio/best` 兜底、字幕 `en.*` 通配触发 429 �
   </tr>
 </table>
 
-## License & 二开须知
+## License & 二开须知 · Contributing
 
-MIT — 见 [LICENSE](LICENSE)。欢迎自取、修改、二次开发，也欢迎把它接进你自己的产品或工作流。
+MIT — 见 [LICENSE](LICENSE)。欢迎 **Star / Fork / Issue**，也欢迎二次开发、魔改、接进你自己的产品或工作流。**唯一的请求**：二开或转载时**注明出处**，并 **@ 一下我**（公众号 / 小红书「**杰西卡聊AI**」，主页见上）——让顺着来的人能找到源头，就是最好的感谢 🙏。
 
-**唯一的请求**：二开或转载时**注明出处**，并 **@ 一下我**（小红书 / 公众号搜「**杰西卡聊AI**」，
-主页见上）——让顺着来的人能找到源头，一起 learn/build in public，就是最好的感谢 🙏。
+MIT licensed — see [LICENSE](LICENSE). **Star / Fork / Issues welcome**, and feel free to remix, modify, or build it into your own product or workflow. **One ask:** if you fork/remix or repost, please **credit the source and @ me** (Jessica · 杰西卡聊AI). That's the best thank-you 🙏.
