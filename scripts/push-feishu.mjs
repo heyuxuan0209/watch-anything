@@ -14,6 +14,7 @@
 //   node push-feishu.mjs --mode doc  --title "标题" --file full.md
 //   node push-feishu.mjs --mode auto --title "标题" --file card.md [--full-file full.md] [--source-url URL]
 //   （--file 也可换成 --text "内容"；auto = 有 doc 凭证就建文档，再把文档链接一起推进卡片）
+//   node push-feishu.mjs --dry-run --title "标题" --file card.md   # 只打印会推什么，不碰网络
 //   node push-feishu.mjs --get-open-id --mobile 13800138000   # 配置辅助：查自己的 open_id
 // 输出: JSON { ok, mode, docUrl?, cardSent?, error? }
 //
@@ -55,6 +56,15 @@ function webhookSign(secret, timestamp) {
 function clip(s, max) {
   if (!s) return '';
   return s.length <= max ? s : s.slice(0, max) + '\n\n…（内容较长已截断，完整版见文档 / 本地 markdown）';
+}
+
+// 去掉三层分隔符（`—— 卡片 ——` / `—— 全稿 ——` / `—— 精读 ——` / `—— 全文中译 ——`）。
+// 它们只是拆分标记，拆完就该消失；顺手收掉留下的空行，别在文档里留一道空白。
+function stripSeparators(md) {
+  const SEP = /^[ \t]*——[ \t]*(卡片|全稿|精读|全文中译)[ \t]*——[ \t]*$/;
+  return md.split('\n').filter(l => !SEP.test(l)).join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 // markdown → lark_md。
@@ -312,26 +322,40 @@ async function main() {
   //   群卡片 ← 卡片那层 + 讲述脉络目录（当索引）+ 文档链接
   let fullMarkdown = markdown;
   let outline = [];
+  let hasFullText = false;
   if (args['full-file']) {
     fullMarkdown = await readFile(String(args['full-file']), 'utf8');
+    hasFullText = true;
   } else {
     const m = markdown.match(/^\s*——\s*(全稿|精读)\s*——\s*$/m);
     if (m) {
+      hasFullText = true;
       fullMarkdown = markdown;                                  // 文档拿整篇
       // 讲述脉络的 ### 小标题 → 卡片上的目录，让人一眼看到这份解读覆盖了哪些段落
       const arc = markdown.slice(m.index).match(/^##\s*讲述脉络[\s\S]*?(?=^##\s|^——|\Z)/m);
       if (arc) outline = [...arc[0].matchAll(/^###\s+(.*)$/gm)].map(x => x[1].trim());
-      markdown = markdown.slice(0, m.index)                     // 卡片只拿第一层
-        .replace(/^\s*——\s*卡片\s*——\s*$/m, '')
-        .trimEnd();
+      markdown = markdown.slice(0, m.index).trimEnd();          // 卡片只拿第一层
     }
   }
+  // 分隔符是给这个脚本拆层用的机器标记，人不该看见它。
+  // 2026-08-12 实测：不去掉，`—— 全稿 ——` / `—— 全文中译 ——` 会原样躺在云文档正文里。
+  fullMarkdown = stripSeparators(fullMarkdown);
+  markdown = stripSeparators(markdown);
 
   const sourceUrl = args['source-url'] ? String(args['source-url']) : null;
 
+  // --dry-run：只打印会推出去的东西，不碰网络。改模板/改拆分逻辑时用它自检，别拿真群当靶场。
+  if (args['dry-run']) {
+    return {
+      ok: true, mode, dryRun: true, hasFullText, outline,
+      card: { chars: markdown.length, preview: toLarkMd(markdown, title) },
+      doc: { chars: fullMarkdown.length, preview: fullMarkdown.slice(0, 600) },
+    };
+  }
+
   if (mode === 'card') {
     if (!hasWebhook()) die('未配 FEISHU_WEBHOOK。群里加个「自定义机器人」拿 URL，见 integrations/feishu.md');
-    await pushCard({ title, markdown, sourceUrl, outline, hasFullText: fullMarkdown !== markdown });
+    await pushCard({ title, markdown, sourceUrl, outline, hasFullText });
     return { ok: true, mode: 'card', cardSent: true };
   }
 
@@ -357,7 +381,7 @@ async function main() {
   }
   let cardSent = false;
   if (hasWebhook()) {
-    await pushCard({ title, markdown, sourceUrl, docUrl, outline, hasFullText: fullMarkdown !== markdown });
+    await pushCard({ title, markdown, sourceUrl, docUrl, outline, hasFullText });
     cardSent = true;
   }
   return { ok: true, mode: 'auto', docUrl, cardSent };

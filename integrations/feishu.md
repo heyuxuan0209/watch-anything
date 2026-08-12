@@ -118,6 +118,13 @@ node scripts/push-feishu.mjs --title "标题" --file card.md --full-file full.md
 
 `--text "内容"` 可以替代 `--file`。输出永远是一行 JSON。
 
+改了模板或拆分逻辑，先用 `--dry-run` 自检——只打印会推出去的卡片文本和文档正文，**不碰网络**，
+别拿真群当靶场：
+
+```bash
+node scripts/push-feishu.mjs --dry-run --title "标题" --file card.md
+```
+
 ---
 
 ## 踩过的坑（照抄的时候别绕回去）
@@ -131,6 +138,9 @@ node scripts/push-feishu.mjs --title "标题" --file card.md --full-file full.md
   另外两处也在 `toLarkMd()` 里处理了：`【摘要】` 这类分区标记自动加粗（模板里是裸的，
   markdown 产物保持干净，加粗只是飞书这一侧的排版需要）；正文首行的 H1 若与 `--title` 同义
   则整行丢弃 —— 卡片头部已经显示标题了，不去重每张卡都会把标题写两遍。
+- **三层分隔符要在推送前去掉**：`—— 卡片 ——` / `—— 全稿 ——` / `—— 全文中译 ——` 是给脚本
+  拆层用的机器标记，2026-08-12 实测第一版忘了删，它们原样躺在云文档正文里。
+  `stripSeparators()` 负责收干净——**新增分隔符时记得同步这个函数**。
 - **`--title` 会被截到 60 字**：飞书导入的文件名有长度限制，超了整个任务失败。
 - **上传素材时不要手写 `Content-Type`**：multipart 边界由 `fetch` 自动生成，手写就传不上去。
 - **文档必须转 owner**：不转的话它挂在应用名下，你在飞书里根本搜不到，只会留下一堆孤儿文档。
