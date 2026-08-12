@@ -303,6 +303,15 @@ subscription or API already costs you. The skill adds no separate model call.
   so it usually just works; to fix it properly, reinstall with `pip install -U yt-dlp`.
 - Without yt-dlp, only text-only X tweets work — every video route needs it.
 
+### "Audio download failed: timed out" on a long video
+
+- The default budget is 20 minutes. An hour-long talk downloads as HLS fragments, which really can
+  hit that ceiling on a slow connection — raise it with
+  `WA_DOWNLOAD_TIMEOUT_MIN=40 node scripts/transcribe-video.mjs ...`.
+- The script already prefers a ≤64kbps audio track and pulls fragments 8 at a time (transcription only
+  cares about speech, so low bitrate costs nothing; an hour-long video drops from 55MB to 28MB). If it
+  still times out, it's your network — try a proxy.
+
 ### It downloaded the audio but transcription failed
 
 - With no `GROQ_API_KEY` and no `faster-whisper`, there is no transcriber. Install one:

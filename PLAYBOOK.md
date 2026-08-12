@@ -84,6 +84,8 @@ node scripts/transcribe-video.mjs "<url>" --full # 长视频要全程转写
 - `truncated:true` → 视频超过 40 分钟只转了前段，材料头部与解读里都要声明
 - 代理：yt-dlp 天然读 `http_proxy/https_proxy`；设了 `YOUTUBE_PROXY_URL` 而 shell 未配
   代理时脚本会自动加 `--proxy`（X 与 YouTube 复用同一代理出口）
+- 音轨按**低码率优先**（≤64k）下载并发拉 HLS 分片：转写只吃人声，码率低不影响识别，
+  但一小时的视频能从 55MB 降到 28MB。下载超时默认 20 分钟，`WA_DOWNLOAD_TIMEOUT_MIN` 可调
 - yt-dlp 未安装 → 视频路由整体不可用，如实告知装法（`brew install yt-dlp`），
   不要试图用别的方式硬抓视频
 

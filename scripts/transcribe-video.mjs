@@ -29,7 +29,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const MAX_AUDIO_SECONDS = 2400;   // 兜底自动转写：40 分钟
 const FULL_AUDIO_SECONDS = 10800; // --full：3 小时
-const DOWNLOAD_TIMEOUT = 5 * 60000;
+// 下载超时：一小时的播客/演讲，慢网络下 5 分钟真的下不完（实测踩到）。
+// 给到 20 分钟，急用的人可以用 WA_DOWNLOAD_TIMEOUT_MIN 自己调小。
+const DOWNLOAD_TIMEOUT = Number(process.env.WA_DOWNLOAD_TIMEOUT_MIN || 20) * 60000;
 const TRANSCRIBE_TIMEOUT = 15 * 60000;
 
 const url = (process.argv[2] || '').trim();
@@ -119,12 +121,17 @@ async function execWithRetry(cmd, args) {
   }
 }
 
-// yt-dlp 下音轨。X 视频多为音画合流 mp4（无独立 bestaudio 流），故 bestaudio/best 兜底
-// 整段视频，faster-whisper 内置 PyAV / Groq 都能直接解出音轨（免 ffmpeg）。
+// yt-dlp 下音轨。转写只吃人声，whisper 内部还会重采样到 16kHz 单声道，**码率越低越好**：
+// 2026-08-12 实测一条 60 分钟的 X 视频，bestaudio 挑到 128k（55MB，HLS 逐段下），5 分钟超时
+// 拉不完；同一条的 32k 音轨只有 13.7MB，转写质量没差别。所以按码率从低到高挑：
+// 64k 以内优先 → 退 bestaudio → 最后才 best（X 有些是音画合流 mp4，没有独立音轨）。
+// 顺带 -N 8 并发拉 HLS 分片：m3u8 是几百个小段，串行下载才是长视频真正的瓶颈。
+// 副作用是文件更小，Groq 免费档 25MB 上限也更难撞到。
 async function downloadAudio(workDir) {
   const [cmd, pre] = await ytdlp();
   await execWithRetry(cmd, [
-    ...pre, '-f', 'bestaudio/best', '-o', join(workDir, 'audio.%(ext)s'),
+    ...pre, '-f', 'bestaudio[abr<=64]/bestaudio/best', '-N', '8',
+    '-o', join(workDir, 'audio.%(ext)s'),
     '--no-playlist', ...proxyArgs(), url,
   ]);
   const files = await readdir(workDir, { recursive: true });
