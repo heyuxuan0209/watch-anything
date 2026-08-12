@@ -59,6 +59,24 @@ function parseSubtitles(raw) {
   return out.join('\n').trim();
 }
 
+// 解析可用的 yt-dlp 调用方式，结果缓存。
+// homebrew 升级 Python 后，yt-dlp 的 shebang 会指向已删掉的解释器，二进制还在但一跑就
+// 「bad interpreter」——2026-08-12 在本机实测到。这种情况下 `python3 -m yt_dlp` 通常仍然可用，
+// 所以先探二进制、坏了就落模块调用，别让一个坏 shebang 把整条视频路由废掉。
+let ytdlpCmd = null;
+async function ytdlp() {
+  if (ytdlpCmd) return ytdlpCmd;
+  for (const cand of [['yt-dlp', []], ['python3', ['-m', 'yt_dlp']]]) {
+    try {
+      await pexec(cand[0], [...cand[1], '--version'], { timeout: 20000 });
+      ytdlpCmd = cand;
+      if (cand[0] !== 'yt-dlp') process.stderr.write('[yt-dlp] 二进制不可用，已降级到 python3 -m yt_dlp\n');
+      return ytdlpCmd;
+    } catch { /* 试下一个 */ }
+  }
+  throw new Error('未安装可用的 yt-dlp（brew install yt-dlp；若报 bad interpreter 用 pip install -U yt-dlp 重装），无法处理视频');
+}
+
 // yt-dlp 拉字幕（含自动字幕）。命中返回纯文本，无字幕/失败返回 null（不阻断，落 ASR）。
 async function fetchCaptions(workDir) {
   const args = [
@@ -69,7 +87,8 @@ async function fetchCaptions(workDir) {
     '-o', join(workDir, 'sub.%(ext)s'), ...proxyArgs(), url,
   ];
   try {
-    await pexec('yt-dlp', args, { timeout: DOWNLOAD_TIMEOUT, maxBuffer: 8 * 1024 * 1024 });
+    const [cmd, pre] = await ytdlp();
+    await pexec(cmd, [...pre, ...args], { timeout: DOWNLOAD_TIMEOUT, maxBuffer: 8 * 1024 * 1024 });
   } catch (err) {
     process.stderr.write(`[captions] 拉取失败：${(err.stderr || err.message || '').toString().slice(0, 120)}\n`);
     return null;
@@ -103,8 +122,9 @@ async function execWithRetry(cmd, args) {
 // yt-dlp 下音轨。X 视频多为音画合流 mp4（无独立 bestaudio 流），故 bestaudio/best 兜底
 // 整段视频，faster-whisper 内置 PyAV / Groq 都能直接解出音轨（免 ffmpeg）。
 async function downloadAudio(workDir) {
-  await execWithRetry('yt-dlp', [
-    '-f', 'bestaudio/best', '-o', join(workDir, 'audio.%(ext)s'),
+  const [cmd, pre] = await ytdlp();
+  await execWithRetry(cmd, [
+    ...pre, '-f', 'bestaudio/best', '-o', join(workDir, 'audio.%(ext)s'),
     '--no-playlist', ...proxyArgs(), url,
   ]);
   const files = await readdir(workDir, { recursive: true });
