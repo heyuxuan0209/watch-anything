@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "watch-anything · 待读队列",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "看到看不完的视频，点一下丢进待读队列，接着看你的。你的 agent 稍后把它读完。",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["http://127.0.0.1/*"],
