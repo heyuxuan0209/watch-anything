@@ -86,6 +86,8 @@ node scripts/transcribe-video.mjs "<url>" --full # 长视频要全程转写
   代理时脚本会自动加 `--proxy`（X 与 YouTube 复用同一代理出口）
 - 音轨按**低码率优先**（≤64k）下载并发拉 HLS 分片：转写只吃人声，码率低不影响识别，
   但一小时的视频能从 55MB 降到 28MB。下载超时默认 20 分钟，`WA_DOWNLOAD_TIMEOUT_MIN` 可调
+- 配了 `GROQ_API_KEY` 且视频超过 45 分钟时，自动再降到 32k（约 14MB/小时），
+  **为的是留在 Groq 的 25MB 上限内**，否则一小时的演讲会白白退回慢十倍的本地 whisper
 - yt-dlp 未安装 → 视频路由整体不可用，如实告知装法（`brew install yt-dlp`），
   不要试图用别的方式硬抓视频
 

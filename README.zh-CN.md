@@ -291,6 +291,8 @@ skill 不额外调任何模型。
   用 `WA_DOWNLOAD_TIMEOUT_MIN=40 node scripts/transcribe-video.mjs ...` 放宽即可
 - 脚本已经按 ≤64k 的低码率音轨优先 + 8 路并发拉分片（转写只吃人声，码率低不影响识别，
   一小时视频从 55MB 降到 28MB）。还是超时的话基本是网络问题，配代理试试
+- 配了 `GROQ_API_KEY` 且视频超过 45 分钟时会再降到 32k（约 14MB/小时），
+  好留在 Groq 的 25MB 上限内——否则一小时的演讲会退回本地 whisper，慢十倍
 
 ### 音轨下下来了，转写失败
 

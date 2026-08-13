@@ -311,6 +311,8 @@ subscription or API already costs you. The skill adds no separate model call.
 - The script already prefers a ≤64kbps audio track and pulls fragments 8 at a time (transcription only
   cares about speech, so low bitrate costs nothing; an hour-long video drops from 55MB to 28MB). If it
   still times out, it's your network — try a proxy.
+- With `GROQ_API_KEY` set and a video longer than 45 minutes, it drops further to 32kbps (~14MB/hour) to
+  stay under Groq's 25MB ceiling — otherwise an hour-long talk falls back to local whisper, ten times slower.
 
 ### It downloaded the audio but transcription failed
 

@@ -127,10 +127,37 @@ async function execWithRetry(cmd, args) {
 // 64k 以内优先 → 退 bestaudio → 最后才 best（X 有些是音画合流 mp4，没有独立音轨）。
 // 顺带 -N 8 并发拉 HLS 分片：m3u8 是几百个小段，串行下载才是长视频真正的瓶颈。
 // 副作用是文件更小，Groq 免费档 25MB 上限也更难撞到。
+// 探时长（只读元数据，不下载）。拿不到就返回 null —— 这只用来挑码率，探不到不该阻断下载。
+// 注：HLS 站点（X/B站）的 filesize_approx 是空的，所以只能按时长估体积，不能按体积过滤。
+async function probeDurationSec() {
+  try {
+    const [cmd, pre] = await ytdlp();
+    const { stdout } = await pexec(cmd, [
+      ...pre, '--simulate', '--print', '%(duration)s', '--no-playlist', ...proxyArgs(), url,
+    ], { timeout: 60000 });
+    const sec = Number(String(stdout).trim().split('\n').pop());
+    return Number.isFinite(sec) && sec > 0 ? sec : null;
+  } catch { return null; }
+}
+
+// 配了 Groq key 且视频够长时，主动降到 32k —— 为的是别撞 Groq 的 25MB 上限。
+// 64k 约 27MB/小时：一小时的演讲刚好卡在上限外面，白白退回慢十倍的本地 whisper；
+// 32k 只有约 14MB/小时，人声一样听得清（whisper 反正要重采样到 16kHz 单声道）。
+// 没配 Groq 就没有这个上限约束，保持 64k。
+const GROQ_SAFE_SECONDS = 45 * 60;
+function audioFormat(durationSec) {
+  const lowBitrate = process.env.GROQ_API_KEY && durationSec && durationSec > GROQ_SAFE_SECONDS;
+  if (lowBitrate) process.stderr.write('[audio] 视频较长且配了 Groq，改用 32k 音轨以留在云转写的 25MB 上限内\n');
+  return lowBitrate
+    ? 'bestaudio[abr<=32]/bestaudio[abr<=64]/bestaudio/best'
+    : 'bestaudio[abr<=64]/bestaudio/best';
+}
+
 async function downloadAudio(workDir) {
   const [cmd, pre] = await ytdlp();
+  const fmt = audioFormat(process.env.GROQ_API_KEY ? await probeDurationSec() : null);
   await execWithRetry(cmd, [
-    ...pre, '-f', 'bestaudio[abr<=64]/bestaudio/best', '-N', '8',
+    ...pre, '-f', fmt, '-N', '8',
     '-o', join(workDir, 'audio.%(ext)s'),
     '--no-playlist', ...proxyArgs(), url,
   ]);
