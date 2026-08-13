@@ -60,13 +60,26 @@ configured it goes through the cloud; without it, transcribe locally (audio neve
 This is also its real value relative to read-anything: read currently only grabs X as **text**, and
 **does not download and transcribe video**; watch fills in exactly that gap.
 
-## Why a skill, not a browser extension
+## A browser extension? There is one — but only as a trigger
 
-Because the killer feature "caption-less video transcription" needs `yt-dlp` + `whisper` — **these
-can't run inside a browser extension**. A skill is the only form that is "zero-server + full-capability":
-the host Claude Code is itself the large model, and the skill just provides the fetching / transcription
-scripts, leaving translation and interpretation to the host agent. So it doesn't need you to stand up
-your own backend — clone it and it just works.
+The killer feature, caption-less transcription, needs `yt-dlp` + `whisper` — **neither can run inside a
+browser extension's sandbox**. So the engine has to live on your machine, and the extension gets to do
+exactly one thing: **not interrupt what you're watching**.
+
+That's what `extension/` is. See a video you'll never finish, **click the icon and move on**; the link
+lands in a local read-later queue, your agent reads it later and writes the markdown (and pushes it to
+Feishu if you configured that). Skipping it changes nothing — `--add` on the command line and just
+handing the link to your agent are the same thing.
+
+```
+watching something → one click (0.2s) → queue → agent, in the background: fetch · transcribe · three-layer breakdown
+                                              → Feishu: card (30s triage) + cloud doc (deep read / highlights / arc / full text)
+                                              → remix: newsletter, image cards, slides
+```
+
+Install steps and the agent-side workflow live in [`extension/README.md`](extension/README.md).
+Anything claiming to read a caption-less video entirely inside your browser has a local process behind
+it — that's not laziness, that's the boundary.
 
 ## Let your coding agent install it for you
 
@@ -351,7 +364,8 @@ watch-anything/
 ├── PLAYBOOK.md       # 通用剧本：路由/转写降级链/卡片格式/诚实守则（agent 无关）★
 ├── templates/        # 解读模板（卡片/快扫/访谈/Thread + 你自己的）
 ├── integrations/     # 输出终点：feishu.md（同时是写新终点的模板）
-└── scripts/          # fetch-x / transcribe-video / vtt-to-text / push-feishu（零依赖）+ transcribe.py（本地 whisper）
+├── extension/        # Optional browser extension: one click drops a link into the read-later queue
+└── scripts/          # fetch-x / transcribe-video / vtt-to-text / push-feishu / queue-server（零依赖）+ transcribe.py（本地 whisper）
 ```
 
 Each script runs standalone, JSON in/out, making it easy to hook into your own pipeline.

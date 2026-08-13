@@ -179,6 +179,34 @@ node scripts/push-feishu.mjs --title "<中文标题>" --file <卡片md> [--full-
 
 ---
 
+## ④.6 队列模式（可选，装了扩展才走）
+
+用户在浏览器里点扩展图标 → 链接进 `~/.watch-anything/queue.jsonl` → 你后台取走解读。
+**它解决的是「不打断正在看的东西」**：用户点完就走了，不在等你回话。
+
+```bash
+node scripts/queue-server.mjs --list --json     # 拿待处理清单
+```
+
+对每一条：按 ①~④ 正常解读 → 有输出终点就推（④.5）→ 然后销单：
+
+```bash
+node scripts/queue-server.mjs --done <id> --doc-url "<飞书文档链接，没有就省略>"
+node scripts/queue-server.mjs --fail <id> "<失败原因，照实写>"   # 失败也要销，别让它烂在队列里
+```
+
+三条纪律：
+
+- **一次只处理一条**，处理完再取下一条。转写是重活，并行只会互相抢 CPU。
+- **失败必须 `--fail` 并写清原因**，用户下次 `--list` 时要能看懂为什么没读成，
+  而不是发现队列莫名其妙空了。
+- **别自作主张改用户塞进来的链接**（比如把 X 链接换成 YouTube 原片）——他点的是哪条就读哪条。
+
+队列是明文 jsonl，用户可以手改、可以 grep。想定时轮询就交给 agent 自己的定时能力
+（Claude Code 的 `/loop` 之类），这个 skill 不内建守护进程。
+
+---
+
 ## ⑤ 对话模式
 
 卡片解读输出后进入问答。规则：

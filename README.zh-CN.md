@@ -57,12 +57,23 @@ watch-anything 的核心是一条完整的转写降级链，每一级失败自�
 （音频不出本机）。这也是它相对 read-anything 的真价值：read 现在只把 X 当**文字**抓，
 **不下载转写视频**；watch 补上的正是这块。
 
-## 为什么是 skill，不是浏览器插件
+## 浏览器扩展？有，但它只当触发器
 
-因为杀手锏「无字幕视频转写」需要 `yt-dlp` + `whisper`——**这些在浏览器插件里跑不了**。
-skill 是唯一「零服务器 + 全能力」的形态：宿主 Claude Code 本身就是大模型，skill 只
-负责提供抓取 / 转写脚本，翻译解读交给宿主 agent。所以它不需要你自己架后端，
-克隆下来就能用。
+杀手锏「无字幕视频转写」需要 `yt-dlp` + `whisper`——**这两件事在浏览器扩展的沙箱里跑不了**。
+所以引擎必须在你本机，扩展只能做一件事：**不打断你正在看的东西**。
+
+`extension/` 里就是这么一个扩展：看到一条看不完的视频，**点一下图标就走**，链接进本机待读队列；
+你的 agent 稍后把它读完，落成 markdown（配了飞书就一起推过去）。不装也完全不影响——
+命令行 `--add` 和直接把链接丢给 agent 是同一件事。
+
+```
+浏览器里正看着 → 点一下（0.2 秒）→ 进队列 → agent 后台：抓取·转写·三层解读
+                                          → 推飞书：卡片(30 秒判断) + 云文档(精读/金句/脉络/全文)
+                                          → 再加工：公众号图文 / 小红书图卡 / PPT
+```
+
+装法和 agent 取件流程见 [`extension/README.md`](extension/README.md)。
+任何声称「在浏览器里就能读完无字幕视频」的东西，背后都有一个本机进程——这不是偷懒，是边界。
 
 ## 让你的 coding agent 带你装
 
@@ -328,7 +339,8 @@ watch-anything/
 ├── PLAYBOOK.md       # 通用剧本：路由/转写降级链/卡片格式/诚实守则（agent 无关）★
 ├── templates/        # 解读模板（卡片/快扫/访谈/Thread + 你自己的）
 ├── integrations/     # 输出终点：feishu.md（同时是写新终点的模板）
-└── scripts/          # fetch-x / transcribe-video / vtt-to-text / push-feishu（零依赖）+ transcribe.py（本地 whisper）
+├── extension/        # 可选：浏览器扩展，点一下把链接丢进待读队列（不打断你正在看的）
+└── scripts/          # fetch-x / transcribe-video / vtt-to-text / push-feishu / queue-server（零依赖）+ transcribe.py（本地 whisper）
 ```
 
 各脚本单独可跑，JSON 进出，方便你接进自己的管道。
