@@ -51,6 +51,9 @@ function parseSubtitles(raw) {
   let last = '';
   for (let line of raw.split(/\r?\n/)) {
     line = line.replace(/<[^>]+>/g, '').trim(); // 去 <c>/<00:00:00.000> 等内联标签
+    // YouTube 自动字幕里说话人标记是 &gt;&gt;，不解实体的话会原样进解读稿
+    line = line.replace(/&(amp|lt|gt|quot|#39|nbsp);/g,
+      m => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' }[m]));
     if (!line || line === 'WEBVTT') continue;
     if (line.includes('-->')) continue;         // 时间轴行
     if (/^\d+$/.test(line)) continue;           // SRT 序号
@@ -79,27 +82,81 @@ async function ytdlp() {
   throw new Error('未安装可用的 yt-dlp（brew install yt-dlp；若报 bad interpreter 用 pip install -U yt-dlp 重装），无法处理视频');
 }
 
-// yt-dlp 拉字幕（含自动字幕）。命中返回纯文本，无字幕/失败返回 null（不阻断，落 ASR）。
+// 先问清楚这条视频有什么（一次元数据调用，不下载），结果缓存。
+// 拿到三样东西：时长（决定音轨码率）、有哪些字幕轨、原声是什么语言。
+// 拿不到就返回空壳 —— 这一步只用来做选择，不该阻断后面的流程。
+let metaCache = null;
+async function probeMeta() {
+  if (metaCache) return metaCache;
+  metaCache = { duration: null, manual: [], auto: [], language: null };
+  try {
+    const [cmd, pre] = await ytdlp();
+    const { stdout } = await pexec(cmd, [
+      ...pre, '--dump-single-json', '--skip-download', '--no-playlist', ...proxyArgs(), url,
+    ], { timeout: 90000, maxBuffer: 128 * 1024 * 1024 });
+    const j = JSON.parse(stdout);
+    metaCache = {
+      duration: Number(j.duration) || null,
+      manual: Object.keys(j.subtitles || {}),
+      auto: Object.keys(j.automatic_captions || {}),
+      language: j.language || null,
+    };
+  } catch { /* 探不到就按没有处理 */ }
+  return metaCache;
+}
+
+// 挑一条、而且只挑一条字幕轨。
+// 2026-08-13 实测教训：一次性索要 zh-Hans,zh-Hant,zh,en,en-orig，YouTube 会把中文当成
+// **机器翻译轨**逐条下发，下到第二条就 HTTP 429 限流，结果一条字幕都没拿到、白跑十几分钟
+// 本地 whisper —— 而那条视频本来是有字幕的。
+// 所以规则是：人工字幕优先；自动字幕**只认原声轨**（原声之外全是机器翻译，既慢又招限流）。
+function pickSubLang(meta) {
+  for (const l of [meta.language, 'en', 'zh-Hans', 'zh-Hant', 'zh'].filter(Boolean)) {
+    if (meta.manual.includes(l)) return { lang: l, kind: '人工字幕' };
+  }
+  if (meta.language && meta.auto.includes(meta.language)) return { lang: meta.language, kind: '自动字幕(原声)' };
+  const orig = meta.auto.find(k => k.endsWith('-orig'));
+  if (orig) return { lang: orig, kind: '自动字幕(原声)' };
+  if (meta.auto.includes('en')) return { lang: 'en', kind: '自动字幕' };
+  return null;
+}
+
+// yt-dlp 拉字幕。命中返回纯文本，无字幕/失败返回 null（不阻断，落 ASR）。
 async function fetchCaptions(workDir) {
+  const meta = await probeMeta();
+  const pickLang = pickSubLang(meta);
+  if (!pickLang) {
+    process.stderr.write('[captions] 这条视频没有可用字幕轨，走转写\n');
+    return null;
+  }
+  process.stderr.write(`[captions] 选中 ${pickLang.lang}（${pickLang.kind}）\n`);
+
   const args = [
     '--skip-download', '--write-subs', '--write-auto-subs',
-    // 精确语言列表：不用 en.* 通配（会连带拉自动翻译版触发 429），只补几个常见变体
-    '--sub-langs', 'zh-Hans,zh-Hant,zh,en,en-orig',
+    '--sub-langs', pickLang.lang,            // 只要这一条，别让 yt-dlp 顺手去拉翻译版
     '--sub-format', 'vtt/srt/best', '--no-playlist',
     '-o', join(workDir, 'sub.%(ext)s'), ...proxyArgs(), url,
   ];
-  try {
-    const [cmd, pre] = await ytdlp();
-    await pexec(cmd, [...pre, ...args], { timeout: DOWNLOAD_TIMEOUT, maxBuffer: 8 * 1024 * 1024 });
-  } catch (err) {
-    process.stderr.write(`[captions] 拉取失败：${(err.stderr || err.message || '').toString().slice(0, 120)}\n`);
-    return null;
+  // 429 是瞬时限流，隔几秒重试一次通常就过了；再失败才认命走 ASR
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const [cmd, pre] = await ytdlp();
+      await pexec(cmd, [...pre, ...args], { timeout: DOWNLOAD_TIMEOUT, maxBuffer: 8 * 1024 * 1024 });
+      break;
+    } catch (err) {
+      const msg = (err.stderr || err.message || '').toString();
+      if (attempt === 0 && /429|Too Many Requests/i.test(msg)) {
+        process.stderr.write('[captions] 被限流（429），5 秒后重试一次\n');
+        await new Promise(r => setTimeout(r, 5000));
+        continue;
+      }
+      process.stderr.write(`[captions] 拉取失败：${msg.slice(-160).trim()}\n`);
+      return null;
+    }
   }
   const files = (await readdir(workDir)).filter(f => /\.(vtt|srt)$/i.test(f));
   if (!files.length) return null;
-  // 优先中文字幕（含自动），其次英文
-  const pick = files.sort((a, b) => (/(zh|Hans|Hant)/i.test(b) ? 1 : 0) - (/(zh|Hans|Hant)/i.test(a) ? 1 : 0))[0];
-  const text = parseSubtitles(await readFile(join(workDir, pick), 'utf-8'));
+  const text = parseSubtitles(await readFile(join(workDir, files[0]), 'utf-8'));
   return text.length >= 40 ? text : null;
 }
 
@@ -127,19 +184,6 @@ async function execWithRetry(cmd, args) {
 // 64k 以内优先 → 退 bestaudio → 最后才 best（X 有些是音画合流 mp4，没有独立音轨）。
 // 顺带 -N 8 并发拉 HLS 分片：m3u8 是几百个小段，串行下载才是长视频真正的瓶颈。
 // 副作用是文件更小，Groq 免费档 25MB 上限也更难撞到。
-// 探时长（只读元数据，不下载）。拿不到就返回 null —— 这只用来挑码率，探不到不该阻断下载。
-// 注：HLS 站点（X/B站）的 filesize_approx 是空的，所以只能按时长估体积，不能按体积过滤。
-async function probeDurationSec() {
-  try {
-    const [cmd, pre] = await ytdlp();
-    const { stdout } = await pexec(cmd, [
-      ...pre, '--simulate', '--print', '%(duration)s', '--no-playlist', ...proxyArgs(), url,
-    ], { timeout: 60000 });
-    const sec = Number(String(stdout).trim().split('\n').pop());
-    return Number.isFinite(sec) && sec > 0 ? sec : null;
-  } catch { return null; }
-}
-
 // 配了 Groq key 且视频够长时，主动降到 32k —— 为的是别撞 Groq 的 25MB 上限。
 // 64k 约 27MB/小时：一小时的演讲刚好卡在上限外面，白白退回慢十倍的本地 whisper；
 // 32k 只有约 14MB/小时，人声一样听得清（whisper 反正要重采样到 16kHz 单声道）。
@@ -155,7 +199,7 @@ function audioFormat(durationSec) {
 
 async function downloadAudio(workDir) {
   const [cmd, pre] = await ytdlp();
-  const fmt = audioFormat(process.env.GROQ_API_KEY ? await probeDurationSec() : null);
+  const fmt = audioFormat((await probeMeta()).duration);   // 元数据在拉字幕那步已经探过，这里直接复用
   await execWithRetry(cmd, [
     ...pre, '-f', fmt, '-N', '8',
     '-o', join(workDir, 'audio.%(ext)s'),

@@ -72,8 +72,10 @@ node scripts/transcribe-video.mjs "<url>" --full # 长视频要全程转写
 内部降级链（每级失败自动降下一级）：
 
 1. **字幕优先**（`source:'captions'`）：yt-dlp 拉人工/自动字幕，快、准、无时长限制。
-   语言列表精确写 `zh-Hans,zh-Hant,zh,en,en-orig`，**不用 `en.*` 通配**（会连带拉自动
-   翻译版触发 429 限流，工作台实测坑）。
+   先用一次元数据调用问清楚有哪些轨，**只下一条**：人工字幕优先，自动字幕只认原声轨。
+   **绝不一次索要多种语言**——2026-08-13 实测，一次要 5 种语言时 YouTube 会把中文当机器
+   翻译轨逐条下发，下到第二条就 HTTP 429，一条都没拿到、白跑十几分钟本地 whisper，
+   而那条视频本来有字幕。改成只下原声轨后同一条视频 6 秒拿到全文。
 2. **Groq 云转写**（`engine:'groq'`）：配了 `GROQ_API_KEY` 时用 `whisper-large-v3-turbo`，
    快、近乎免费，单文件 ≤25MB（约短视频/中短播客）。
 3. **本地 whisper**（`engine:'local'`）：faster-whisper，零 API 费、内容不出本机，
