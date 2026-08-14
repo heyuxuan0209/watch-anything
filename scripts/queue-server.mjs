@@ -114,11 +114,25 @@ function serve() {
   });
 }
 
+// 轮询心跳。**「loop 死了」和「队列本来就空」在外部看是同一副样子**（都没有新卡片出现），
+// 所以每一轮无论有没有活都要留一行痕迹：日志停止增长 = 轮询挂了，noop 行在长 = 轮询活着但没活干。
+// 判据来自 ~/.claude/METHOD-多agent状态同步.md 第三节：失败时和成功时同形的信号是废信号。
+const TICK_LOG = join(DIR, 'loop.log');
+async function tick(note = '') {
+  await mkdir(DIR, { recursive: true });
+  const pending = (await load()).filter(i => i.status === 'pending');
+  const line = `${new Date().toISOString()} | pending=${pending.length} | ${note || (pending.length ? 'has-work' : 'noop')}\n`;
+  await appendFile(TICK_LOG, line, 'utf8');
+  return { ok: true, pending: pending.length, items: pending.map(i => ({ id: i.id, url: i.url, title: i.title })) };
+}
+
 // ---------- CLI ----------
 const argv = process.argv.slice(2);
 const flag = (name) => { const i = argv.indexOf(name); return i >= 0 ? (argv[i + 1] || true) : null; };
 
-if (argv.includes('--list')) {
+if (argv.includes('--tick')) {
+  console.log(JSON.stringify(await tick(typeof flag('--tick') === 'string' ? String(flag('--tick')) : '')));
+} else if (argv.includes('--list')) {
   const items = (await load()).filter(i => i.status === 'pending');
   if (argv.includes('--json')) console.log(JSON.stringify({ ok: true, items }));
   else if (!items.length) console.log('队列是空的。');
